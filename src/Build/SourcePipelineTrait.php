@@ -381,8 +381,25 @@ trait SourcePipelineTrait
             $otherFiles = [];
             $vendorRoots = [];
             $vendorFiles = [];
+            $anonymousFiles = [];
             $fileCacheDirs = [];
             foreach ($files as $file) {
+                if (isset($this->anonymousOpcodeKeys[$file])) {
+                    // These files are emitted by this compiler, so their exact
+                    // contents provide a safe cache key independent of any
+                    // user-supplied directory timestamp.
+                    $key = hash('sha256', implode("\n", [
+                        'anonymous-opcodes-v1', $file,
+                        hash_file('sha256', $file), $this->opcodeBuildSignature,
+                    ]));
+                    $cacheDir = $this->getBuildDir() . '/cache/opcache/anonymous-' . substr($key, 0, 20);
+                    if ($this->climate->arguments->defined('force')) {
+                        $this->clearOpcodeCacheDirectory($cacheDir);
+                    }
+                    $fileCacheDirs[$file] = $cacheDir;
+                    $anonymousFiles[$file] = true;
+                    continue;
+                }
                 $vendorRoot = $this->vendorRootForOpcodeFile($file);
                 if ($vendorRoot === null) {
                     $otherFiles[] = $file;
@@ -446,12 +463,17 @@ PHP
             // function names do not conflict while creating their bytecode.
             $pending = [];
             $vendorHits = 0;
+            $anonymousHits = 0;
             foreach ($files as $file) {
                 $cacheDir = $fileCacheDirs[$file];
-                if (isset($vendorFiles[$file])
+                if ((isset($vendorFiles[$file]) || isset($anonymousFiles[$file]))
                     && ($blob = $this->findOpcodeBlob($cacheDir, $file)) !== null) {
                     $blobs[$file] = $blob;
-                    ++$vendorHits;
+                    if (isset($anonymousFiles[$file])) {
+                        ++$anonymousHits;
+                    } else {
+                        ++$vendorHits;
+                    }
                 } else {
                     $pending[] = $file;
                 }
@@ -461,6 +483,13 @@ PHP
                 $this->output(
                     'Vendor opcode cache: ' . $vendorHits . ' reused, '
                     . ($vendorCount - $vendorHits) . ' to generate',
+                    'lightBlue',
+                );
+            }
+            if ($anonymousFiles !== []) {
+                $this->output(
+                    'Anonymous opcode cache: ' . $anonymousHits . ' reused, '
+                    . (count($anonymousFiles) - $anonymousHits) . ' to generate',
                     'lightBlue',
                 );
             }
