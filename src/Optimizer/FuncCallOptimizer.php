@@ -186,7 +186,7 @@ trait FuncCallOptimizer
                 'minArgs' => 0,
                 'maxArgs' => 0,
                 'returnType' => Type::INT,
-                'constantResult' => '2147483647L',
+                'constantResult' => $this->genIntegerLiteral(2147483647),
                 'intrinsic' => true,
             ],
             'getrandmax'        => [
@@ -194,7 +194,7 @@ trait FuncCallOptimizer
                 'minArgs' => 0,
                 'maxArgs' => 0,
                 'returnType' => Type::INT,
-                'constantResult' => '2147483647L',
+                'constantResult' => $this->genIntegerLiteral(2147483647),
                 'intrinsic' => true,
             ],
 
