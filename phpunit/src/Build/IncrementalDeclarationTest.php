@@ -552,11 +552,51 @@ PHP);
         self::assertSame($extensionCode, file_get_contents($extension));
     }
 
-    private function convertProject(): CompilerTest
+    public function testSwitchingTargetsDoesNotReuseAnotherTargetsGeneratedFiles(): void
+    {
+        $first = $this->convertProject();
+        $cpp = $this->invoke($first, 'getCppFile', $this->independent);
+        $original = file_get_contents($cpp);
+
+        $this->convertProject('alternate');
+        self::assertNotSame($original, file_get_contents($cpp));
+
+        $restored = $this->convertProject();
+        self::assertTrue($this->invoke($restored, 'shouldRegeneratePhpFile', $this->independent));
+        self::assertSame($original, file_get_contents($cpp));
+
+        $warm = $this->convertProject();
+        self::assertFalse($this->invoke($warm, 'shouldRegeneratePhpFile', $this->independent));
+    }
+
+    public function testChangedGeneratedFilesInvalidateUnchangedPhpSources(): void
+    {
+        $first = $this->convertProject();
+        $paths = [
+            $this->invoke($first, 'getCppFile', $this->independent),
+            $first->getDeclarationHeaderFile($this->provider),
+            $first->getArgInfoHeaderFile($this->consumer),
+        ];
+        $contents = [];
+        foreach ($paths as $path) {
+            $contents[$path] = file_get_contents($path);
+            file_put_contents($path, "\n// Changed outside the generator\n", FILE_APPEND);
+        }
+
+        $restored = $this->convertProject();
+        foreach ([$this->provider, $this->consumer, $this->independent] as $source) {
+            self::assertTrue($this->invoke($restored, 'shouldRegeneratePhpFile', $source));
+        }
+        foreach ($contents as $path => $original) {
+            self::assertSame($original, file_get_contents($path));
+        }
+    }
+
+    private function convertProject(string $target = 'incremental'): CompilerTest
     {
         global $translator;
 
-        $compiler = $this->newCompiler();
+        $compiler = $this->newCompiler($target);
         $translator = $compiler;
         $files = [$this->provider, $this->consumer, $this->independent];
         $compiler->addFiles([$this->directory]);
@@ -569,7 +609,7 @@ PHP);
         return $compiler;
     }
 
-    private function newCompiler(): CompilerTest
+    private function newCompiler(string $target = 'incremental'): CompilerTest
     {
         $compiler = CompilerTest::create($this->directory);
         // Exercise the same on-disk stable-ID registry used by real builds.
@@ -577,7 +617,7 @@ PHP);
         $forTest = $reflection->getProperty('forTest');
         $forTest->setAccessible(true);
         $forTest->setValue($compiler, false);
-        $compiler->setTargetName('incremental');
+        $compiler->setTargetName($target);
         $this->invoke($compiler, 'setBuildDir', $this->buildDirectory);
         return $compiler;
     }

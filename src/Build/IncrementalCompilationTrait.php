@@ -94,7 +94,15 @@ trait IncrementalCompilationTrait
                 if (!is_bool($emits)) {
                     return false;
                 }
-                return !$emits || is_file($this->getCppFile($source));
+                if ($emits && !is_file($this->getCppFile($source))) {
+                    return false;
+                }
+                // Different targets can share generated paths in one build
+                // directory. A target's saved state alone does not prove that
+                // the files still contain that target's declarations and code.
+                $hashes = $metadata['generatedHashes'] ?? null;
+                return is_array($hashes)
+                    && $hashes === $this->getIncrementalOutputHashes($source, $emits);
             },
             $this->climate->arguments->defined('force'),
         );
@@ -262,13 +270,19 @@ trait IncrementalCompilationTrait
             sort($dependencies, SORT_STRING);
             $initializers = array_keys($this->nativeStaticInitializersInFile[$path] ?? []);
             sort($initializers, SORT_STRING);
+            $emits = $this->incrementalTranslationUnits[$path]
+                ?? (!$this->isStubFile($path) && (bool) ($previous['emitsTranslationUnit'] ?? false));
+            $hashes = $this->getIncrementalOutputHashes($path, $emits);
+            if ($hashes === null) {
+                throw new \RuntimeException('Cannot hash generated outputs for PHP source: ' . $path);
+            }
             $stateFiles[$path] = [
                 'hash' => $this->incrementalSourceHashes[$path],
                 'dependencies' => $dependencies,
                 'symbolsDeclared' => $declared,
                 'symbolsUsed' => $used,
-                'emitsTranslationUnit' => $this->incrementalTranslationUnits[$path]
-                    ?? (!$this->isStubFile($path) && (bool) ($previous['emitsTranslationUnit'] ?? false)),
+                'emitsTranslationUnit' => $emits,
+                'generatedHashes' => $hashes,
                 'header' => $this->getDeclarationHeaderFile($path),
                 'cpp' => $this->getCppFile($path),
                 'splitTranslationUnits' => $this->getSplitTranslationUnits($path),
@@ -282,6 +296,30 @@ trait IncrementalCompilationTrait
             $this->incrementalGeneratorFingerprint,
             $stateFiles,
         );
+    }
+
+    /** @return array<string, string>|null */
+    private function getIncrementalOutputHashes(string $source, bool $emits): ?array
+    {
+        $outputs = [$this->getDeclarationHeaderFile($source), $this->getArgInfoHeaderFile($source)];
+        if ($emits) {
+            $outputs[] = $this->getCppFile($source);
+        }
+        foreach ($this->getSplitTranslationUnits($source) as $part) {
+            $outputs[] = $part;
+        }
+        $hashes = [];
+        foreach ($outputs as $output) {
+            if (!is_file($output)) {
+                return null;
+            }
+            $hash = hash_file('sha256', $output);
+            if (!is_string($hash)) {
+                return null;
+            }
+            $hashes[$output] = $hash;
+        }
+        return $hashes;
     }
 
     /** @param list<string> $files @return array<string, list<string>> */
