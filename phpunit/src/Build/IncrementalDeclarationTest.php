@@ -16,7 +16,7 @@ final class IncrementalDeclarationTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->directory = sys_get_temp_dir() . '/typephp_incremental_' . bin2hex(random_bytes(8));
+        $this->directory = dirname(rtrim(TYPEPHP_ROOT_PATH, '/')) . '/tmp/typephp_incremental_' . bin2hex(random_bytes(8));
         $this->buildDirectory = $this->directory . '/build';
         mkdir($this->directory, 0777, true);
         $this->provider = $this->directory . '/provider.php';
@@ -590,6 +590,75 @@ PHP);
         foreach ($contents as $path => $original) {
             self::assertSame($original, file_get_contents($path));
         }
+    }
+
+    public function testAddingAndRemovingChildOverrideInvalidatesBaseDispatch(): void
+    {
+        file_put_contents($this->provider, <<<'PHP'
+<?php
+namespace Incremental;
+class Actor {
+    public function face(): int { return 1; }
+    public function move(): int { return $this->face(); }
+}
+PHP);
+        $child = <<<'PHP'
+<?php
+class World extends \Incremental\Actor { %s }
+function run(\Incremental\Actor $actor): int { return $actor->face(); }
+function main(): int { $world = new World(); return $world->move() + run($world); }
+PHP;
+        file_put_contents($this->consumer, sprintf($child, ''));
+        $first = $this->convertProject();
+        $baseCpp = $this->invoke($first, 'getCppFile', $this->provider);
+        self::assertStringContainsString('php::toInt(php_incremental__actor__face(this_))', file_get_contents($baseCpp));
+        $unchanged = $this->convertProject();
+        self::assertFalse($this->invoke($unchanged, 'shouldRegeneratePhpFile', $this->provider));
+
+        file_put_contents($this->consumer, sprintf($child, 'public function face(): int { return 2; }'));
+        $overridden = $this->convertProject();
+        self::assertTrue($this->invoke($overridden, 'shouldRegeneratePhpFile', $this->provider));
+        self::assertFalse($this->invoke($overridden, 'shouldRegeneratePhpFile', $this->independent));
+        self::assertStringNotContainsString('php::toInt(php_incremental__actor__face(this_))', file_get_contents($baseCpp));
+        self::assertStringContainsString('typephp_call_method_cached', file_get_contents($baseCpp));
+
+        file_put_contents($this->consumer, sprintf($child, ''));
+        $removed = $this->convertProject();
+        self::assertTrue($this->invoke($removed, 'shouldRegeneratePhpFile', $this->provider));
+        self::assertStringContainsString('php::toInt(php_incremental__actor__face(this_))', file_get_contents($baseCpp));
+    }
+
+    public function testAddingAndRemovingDescendantInvalidatesTypedCallers(): void
+    {
+        file_put_contents($this->provider, <<<'PHP'
+<?php
+class Actor { public function face(): int { return 1; } }
+class Middle extends Actor {}
+PHP);
+        file_put_contents($this->consumer, <<<'PHP'
+<?php
+function run(Actor $actor): int { return $actor->face(); }
+function main(): int { $actor = new Actor(); return run($actor); }
+PHP);
+        $originalIndependent = file_get_contents($this->independent);
+        $first = $this->convertProject();
+        $callerCpp = $this->invoke($first, 'getCppFile', $this->consumer);
+        self::assertStringContainsString('php::toInt(php_actor__face(actor))', file_get_contents($callerCpp));
+
+        file_put_contents($this->independent, <<<'PHP'
+<?php
+class World extends Middle { public function face(): int { return 2; } }
+PHP);
+        $added = $this->convertProject();
+        self::assertTrue($this->invoke($added, 'shouldRegeneratePhpFile', $this->provider));
+        self::assertTrue($this->invoke($added, 'shouldRegeneratePhpFile', $this->consumer));
+        self::assertStringNotContainsString('php::toInt(php_actor__face(actor))', file_get_contents($callerCpp));
+        self::assertStringContainsString('typephp_call_method_cached', file_get_contents($callerCpp));
+
+        file_put_contents($this->independent, $originalIndependent);
+        $removed = $this->convertProject();
+        self::assertTrue($this->invoke($removed, 'shouldRegeneratePhpFile', $this->consumer));
+        self::assertStringContainsString('php::toInt(php_actor__face(actor))', file_get_contents($callerCpp));
     }
 
     private function convertProject(string $target = 'incremental'): CompilerTest
