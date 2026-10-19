@@ -935,11 +935,16 @@ abstract class Preprocessor extends CompilerBase
     {
         $this->resetFunction();
         $property->arrayInitPlan = null;
+        $property->defaultInit = '';
+        $property->defaultClean = '';
         if ($expression instanceof Node\Expr\Array_) {
             $property->arrayInitPlan = $this->buildLiteralArrayInitPlan($expression);
             $property->default = $property->arrayInitPlan->expr;
         } else {
-            $property->default = $this->parseIdentifier($expression);
+            $plan = $this->buildExpressionInitPlan($expression);
+            $property->default = $plan->expr;
+            $property->defaultInit = $plan->init;
+            $property->defaultClean = $plan->clean;
         }
     }
 
@@ -2195,6 +2200,11 @@ abstract class Preprocessor extends CompilerBase
     }
 
     protected function buildLiteralArrayInitPlan(Node\Expr\Array_ $defaultNode): ArrayInitPlan
+    {
+        return $this->buildExpressionInitPlan($defaultNode);
+    }
+
+    protected function buildExpressionInitPlan(Node\Expr $defaultNode): ArrayInitPlan
     {
         $localVarCount = count($this->context->localVars);
         $beforeStmtCount = count($this->context->beforeStmtLines);
