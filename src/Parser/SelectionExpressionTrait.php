@@ -264,9 +264,9 @@ trait SelectionExpressionTrait
     {
         $this->assertExprCanBeUsedAsValue($body, 'match arm');
         if ($body instanceof Expr\Throw_) {
-            [$value, $beforeStmts, $afterStmts] = $this->parseExprWithCapturedStmts($body);
+            // parseThrow materializes its operand before cleaning up temporaries.
+            [$value, $beforeStmts] = $this->parseExprWithCapturedStmts($body);
             $code = $this->formatCapturedStmtLines($beforeStmts);
-            $code .= $this->formatCapturedStmtLines($afterStmts);
             if ($nativeClass !== '') {
                 $code .= $this->getIndent() . $value . ';' . PHP_EOL;
                 $code .= $this->getIndent() . 'return nullptr;' . PHP_EOL;
