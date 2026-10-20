@@ -1,17 +1,66 @@
-# 全局工作约定
+# Working agreements
 
-## 编译与资源安全（用户明确要求）
+## Build concurrency in CI
 
-本机曾因编译资源耗尽而死机重启。稳定性优先于构建速度。以下规则适用于所有项目、Codex 会话、子代理、测试脚本及其子进程；除非用户明确授权提高限制，否则不得自行放宽。
+The user explicitly requires dedicated CI runners to build with their available
+logical CPU count. Detect that count on each runner and pass it to TypePHP,
+CMake, Make/Ninja and Cargo. Do not hard-code CI builds to one or two jobs.
+Use the shared `configure-build-jobs` action and propagate its job settings to
+test harnesses. When PHPT workers already run concurrently, keep each worker's
+nested compiler at one job so concurrency does not multiply.
 
-- 全局最多同时执行一个编译或链接任务。多个 `make -j1` 同时运行仍属于违规并发。不同 PHP 版本、SAPI、构建模式、测试批次、自举阶段必须顺序执行，不得用后台任务、并行工具调用、进程池、子代理或独立会话绕过限制。
-- GCC/Clang 编译和链接均使用单任务；GNU Make 使用 `make -j1`，Ninja 使用 `ninja -j1`，CMake 使用 `cmake --build <目录> --parallel 1`。TypePHP 显式使用 `--job 1`。禁止裸 `-j`、按 CPU 核数自动设置并发，以及任何大于 1 的 jobs 配置。
-- 构建时显式设置 `CMAKE_BUILD_PARALLEL_LEVEL=1`、`PHP_COMPILER_JOBS=1`；Cargo 使用 `CARGO_BUILD_JOBS=1`。检查并消除继承的 `MAKEFLAGS`、`MFLAGS` 和工具内部并发选项的冲突，确保递归构建仍然串行。不能只设置环境变量而不检查实际脚本是否遵守。
-- 启动前检查现有编译/链接进程、可用内存、swap 和系统负载；已有构建时不得启动另一个。禁止终止不属于本任务的进程。
-- Linux 上所有构建入口使用相同的用户级 `flock` 锁：`${XDG_RUNTIME_DIR:-/tmp}/codex-build-$(id -u).lock`。以 `flock -n <锁文件> <完整构建命令及参数>` 包住整个构建进程树；拿不到锁就结束本次尝试，不得改锁名、删除锁文件或在锁外启动构建。锁只在最外层获取，子构建继承锁，不重复获取。该锁用于协调会话，仍须检查不使用此锁的外部构建。
-- 对可能占用大量内存的 C++ 翻译单元、链接、整项目构建和自举，执行前设置覆盖整个构建进程树的内存硬上限，优先使用可用的 cgroup/systemd 用户级资源限制。默认上限不得超过 8 GiB，且不得超过启动时有效可用内存的一半；不要允许构建无限使用 swap。若无法落实限制，先说明具体障碍，不得直接启动高内存构建。不要用每个进程单独的上限冒充整个构建的总上限。
-- 编译过程中关注内存和进程数量；若出现意外并发、内存持续逼近上限、明显换页或系统响应恶化，停止本任务的构建进程树并保留日志。不得通过增加内存上限、并发或自动重试来掩盖失败。
-- OOM、死机、重启或执行句柄丢失后，不自动恢复构建。先检查现存进程、日志及产物完整性，确认资源保护措施已生效，再决定后续动作；不得把被中断的测试或构建记为通过。
-- 优先只编译受影响的目标、运行必要的测试。全量测试、自举编译与自举测试应在阶段性变更累积后执行，不得为小改动反复运行，也不得相互并行。
+This CI policy does not authorize parallel builds on the user's machines.
 
-以上是行为指令，不会自动给操作系统安装资源限制。执行构建的代理必须在实际命令和进程层面落实这些规则。
+## Resource safety on user-managed machines
+
+A previous build exhausted this machine's resources and caused a crash and
+reboot. Stability takes priority over build speed. These rules cover all
+projects, agent sessions, subagents, test scripts and child processes launched
+on user-managed machines. Do not relax them without explicit user authorization.
+
+- Run at most one compilation or link task globally. Multiple simultaneous
+  `make -j1` commands still violate this limit. Run PHP versions, SAPIs, build
+  modes, test batches and bootstrap stages sequentially. Do not bypass the
+  limit with background jobs, parallel tool calls, process pools, subagents or
+  separate sessions.
+- Use `make -j1`, `ninja -j1`, `cmake --build <directory> --parallel 1`, and
+  TypePHP `--job 1`. GCC/Clang compilation and linking must remain serial.
+  Never use bare `-j`, CPU-based automatic concurrency, or a jobs value above one.
+- Explicitly set `CMAKE_BUILD_PARALLEL_LEVEL=1`, `PHP_COMPILER_JOBS=1`, and
+  `CARGO_BUILD_JOBS=1`. Inspect inherited `MAKEFLAGS`, `MFLAGS` and tool-specific
+  options and remove conflicts, including in recursive builds. GNU Make uses
+  `-j1`; NMake rejects that option, so clear GNU Make flags and keep NMake serial
+  with MSVC `/MP1`. Environment variables alone are insufficient: verify that
+  the actual build commands obey these limits.
+- Before starting, inspect existing compiler/linker processes, available memory,
+  swap and system load. Do not start another build while one is active. Never
+  terminate processes belonging to another task.
+- On Linux use the same user-wide lock for every build entry point:
+  `${XDG_RUNTIME_DIR:-/tmp}/codex-build-$(id -u).lock`. Wrap the complete build
+  process tree with `flock -n <lock-file> <command> <arguments>`. If acquisition
+  fails, stop that attempt; do not rename or delete the lock, or build outside
+  it. Acquire it only at the outermost level and let children inherit it.
+  Also check for external builds that do not use this coordination lock.
+- Before a large C++ translation unit, link, whole-project build or bootstrap,
+  impose a hard memory limit covering the entire build process tree, preferably
+  through cgroups or a systemd user scope. The default limit must not exceed
+  8 GiB or half the effective memory available at startup. Do not permit
+  unlimited swap use. If a whole-tree limit cannot be enforced, explain the
+  concrete obstacle before starting a high-memory build. Per-process limits
+  are not a substitute for a process-tree total.
+- Monitor memory and process counts during compilation. Stop this task's build
+  tree and preserve logs if unexpected concurrency, sustained pressure near
+  the limit, significant paging or poor system responsiveness appears. Do not
+  hide failures by raising memory limits, increasing concurrency or retrying.
+- After OOM, a crash, reboot or lost execution handle, do not resume builds
+  automatically. Inspect surviving processes, logs and artifact integrity,
+  and confirm that resource protections work before proceeding. Interrupted
+  builds and tests must never be recorded as passing.
+- Prefer affected targets and necessary tests. Accumulate changes before full
+  suites, bootstrap builds and bootstrap tests; do not repeat them for small
+  edits or run them concurrently.
+
+These are behavioral requirements, not OS resource controls. The agent running
+a build must enforce them in the actual command and process tree. Explicit
+session-specific exceptions from the user take precedence; do not infer new
+exceptions from them.

@@ -2,7 +2,8 @@
 <?php
 
 // Run under the platform's build lock and process-tree resource limit.
-// Each compiler invocation is synchronous and explicitly uses one job.
+// Compiler invocations are synchronous; local builds default to one job.
+// CI supplies its runner CPU count through PHP_COMPILER_JOBS.
 $root = dirname(__DIR__);
 $suite = $root . '/.github/integration/swoole-thread';
 $options = getopt('', ['artifacts:', 'modes:', 'compiler:', 'cxx:', 'no-literal-strings', 'without-exceptions']);
@@ -79,7 +80,7 @@ try {
                     $project = $projectDir . '/bin-embedded.yml';
                 }
                 $command = str_ends_with($compiler, '.php') ? [PHP_BINARY, $compiler] : [$compiler];
-                array_push($command, $project, '--output', $target, '--build-dir', $artifacts . '/build-' . $mode, '--job', '1', '--no-progress');
+                array_push($command, $project, '--output', $target, '--build-dir', $artifacts . '/build-' . $mode, '--job', getenv('PHP_COMPILER_JOBS') ?: '1', '--no-progress');
                 if (isset($options['cxx'])) {
                     array_push($command, '--compiler', $options['cxx']);
                 }

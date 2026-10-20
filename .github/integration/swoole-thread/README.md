@@ -38,8 +38,10 @@ php bin/test-swoole-thread.php --modes=control
 
 Run native modes only inside the platform's protected build launcher, following
 [the repository resource rules](../../../AGENTS.md). The runner fixes TypePHP's
-compiler concurrency at `--job 1`; it does **not** establish an OS memory limit
-or a cross-session build lock itself. Configure `CMAKE_BUILD_PARALLEL_LEVEL=1`,
+compiler concurrency at `--job 1` by default; it does **not** establish an OS
+memory limit or a cross-session build lock itself. Dedicated CI runners set
+`PHP_COMPILER_JOBS` to their available CPU count, which the runner forwards to
+TypePHP. On user-managed machines configure `CMAKE_BUILD_PARALLEL_LEVEL=1`,
 `PHP_COMPILER_JOBS=1` and `CARGO_BUILD_JOBS=1` in the enclosing launcher. For GNU
 Make set `MAKEFLAGS=-j1` and `MFLAGS=-j1`; NMake rejects these flags, so clear
 them and use serial NMake with MSVC `/MP1`. Inspect existing builds and memory first, and retain
