@@ -485,7 +485,7 @@ function runFpmIntegration(array $options, string $temporaryRoot): void
         $options['compiler'], $project . '/project.yml',
         '--php-version', $options['fpm_php_version'],
         '--output', $binary, '--build-dir', $temporaryRoot . '/fpm-build',
-        '--job', '8', '--no-progress',
+        '--job', '1', '--no-progress',
     ], environment: integrationCompilerEnvironment($options), timeout: 1800);
 
     // FPM requires a physical primary-script path before calling the compile hook.

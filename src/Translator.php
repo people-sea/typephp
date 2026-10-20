@@ -1358,6 +1358,8 @@ class Translator extends Preprocessor
                 // The runtime still calls these hooks; keep empty builds in this translation unit.
                 $code .= 'extern "C" void typephp_opcode_table_install(void) {}' . PHP_EOL;
                 $code .= 'extern "C" void typephp_opcode_table_uninstall(void) {}' . PHP_EOL;
+                $code .= 'extern "C" void typephp_opcode_table_request_startup(void) {}' . PHP_EOL;
+                $code .= 'extern "C" void typephp_opcode_table_request_shutdown(void) {}' . PHP_EOL;
             }
         }
 
