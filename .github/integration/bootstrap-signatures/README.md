@@ -15,6 +15,11 @@ and exercises the diagnostic with a real AST node. Before the fix it reproduces
 the startup failure; after the fix it must print `bootstrap-signatures-ok` and
 exit successfully.
 
+The implementation also imports a nested trait returning `self` and implements
+an interface returning `self`. Reflection must report the consuming class,
+never a trait name. This catches stale `resolvedName` attributes left behind
+when trait signature nodes are rebound, before the full PHPT suite runs.
+
 After building the compiler, run inside the platform's protected build session:
 
 ```sh

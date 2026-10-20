@@ -6092,7 +6092,11 @@ CODE;
             }
             $this->fatalError($type, 'Cannot use "parent" when current class scope has no parent');
         }
-        return new Node\Name\FullyQualified($resolved, $type->getAttributes());
+        // NameResolver's cached name still points at the original trait scope.
+        // Arginfo reads that attribute before the spelling of the new node.
+        $attributes = $type->getAttributes();
+        unset($attributes['resolvedName']);
+        return new Node\Name\FullyQualified($resolved, $attributes);
     }
 
     /**
