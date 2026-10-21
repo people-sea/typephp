@@ -1177,6 +1177,21 @@ abstract class Preprocessor extends CompilerBase
             if (!$this->isInternalFunction($funcName)) {
                 $this->symbolCallInFile[$this->file][] = $this->getFunctionDependencySymbol($funcName);
             }
+            // An unqualified call in a namespace also searches the global
+            // function table. Providers can be prepared later, so retain both
+            // AST lookup candidates for headers and incremental invalidation.
+            // Imports, qualified and namespace-relative names have no fallback.
+            if ($node->name->isUnqualified()
+                && !$node->name instanceof Node\Name\FullyQualified
+                && !$node->name instanceof Node\Name\Relative
+                && $node->name->getAttribute('resolvedName') === null
+                && $node->name->getAttribute('namespacedName') instanceof Node\Name
+            ) {
+                $globalName = strtolower($node->name->toString());
+                if (!$this->isInternalFunction($globalName)) {
+                    $this->symbolCallInFile[$this->file][] = $this->getFunctionDependencySymbol($globalName);
+                }
+            }
         } elseif ($node instanceof Node\Expr\ConstFetch) {
             $resolvedName = $node->name->getAttribute('resolvedName')
                 ?? $node->name->getAttribute('namespacedName')

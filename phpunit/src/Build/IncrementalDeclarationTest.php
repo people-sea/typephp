@@ -411,6 +411,33 @@ final class IncrementalDeclarationTest extends TestCase
         self::assertSame($extensionCode, file_get_contents($extension));
     }
 
+    public function testNamespacedGlobalStubCallIncludesProviderAndTracksInvalidation(): void
+    {
+        $this->prepareNativeStub();
+        file_put_contents($this->provider, '<?php function native_global_answer(): int {}');
+        file_put_contents($this->consumer, <<<'PHP'
+<?php
+namespace Consumer {
+    final class Reader {
+        public static function read(): int { return native_global_answer(); }
+    }
+}
+namespace {
+    function main(): int { return \Consumer\Reader::read(); }
+}
+PHP);
+        $compiler = $this->convertProject();
+        $providerHeader = $compiler->getDeclarationHeaderFile($this->provider);
+        $consumerCode = file_get_contents($this->invoke($compiler, 'getCppFile', $this->consumer));
+        self::assertStringContainsString('#include <' . basename($providerHeader) . '>', $consumerCode);
+        self::assertStringContainsString('php_native_global_answer()', $consumerCode);
+        $state = json_decode(file_get_contents($this->buildDirectory . '/cache/incremental/incremental/build-state.json'), true);
+        self::assertContains($this->provider, $state['files'][$this->consumer]['dependencies']);
+        file_put_contents($this->provider, '<?php function native_global_answer(int $value = 42): int {}');
+        $updated = $this->convertProject();
+        self::assertTrue($this->invoke($updated, 'shouldRegeneratePhpFile', $this->consumer));
+    }
+
     public function testStubChangePreservingMtimeInvalidatesTheConsumer(): void
     {
         $this->prepareNativeStub();
